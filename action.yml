@@ -1,0 +1,114 @@
+name: Drengr
+description: >-
+  Run mobile app tests with Drengr on Android emulators and iOS simulators.
+  Parses drengr-tests.yml, drives the device with an AI agent, and reports
+  pass/fail as JSON or JUnit with GitHub annotations.
+
+branding:
+  icon: smartphone
+  color: yellow
+
+inputs:
+  api-key:
+    description: >-
+      LLM API key used to drive the device. If omitted, whichever provider key is
+      already in the job environment is used (DRENGR_API_KEY, GEMINI_API_KEY,
+      OPENAI_API_KEY, ANTHROPIC_API_KEY, ...). One of these is required.
+    required: false
+    default: ""
+  provider:
+    description: LLM provider | gemini, openai, anthropic, groq, together, fireworks, ollama
+    required: false
+    default: ""
+  file:
+    description: Path to drengr-tests.yml (auto-detected if omitted)
+    required: false
+    default: ""
+  format:
+    description: Output format | json, junit, or human
+    required: false
+    default: "json"
+  output:
+    description: File the results are written to (defaults by format; uploaded as the artifact)
+    required: false
+    default: ""
+  version:
+    description: Version of the drengr npm package to install
+    required: false
+    default: "latest"
+  artifact-name:
+    description: Name for the results artifact
+    required: false
+    default: "drengr-results"
+  artifact-retention:
+    description: Days to retain the results artifact
+    required: false
+    default: "7"
+
+outputs:
+  passed:
+    description: Number of passed tests
+    value: ${{ steps.run.outputs.passed }}
+  failed:
+    description: Number of failed tests
+    value: ${{ steps.run.outputs.failed }}
+  total:
+    description: Total test count
+    value: ${{ steps.run.outputs.total }}
+  results-file:
+    description: Path to the results file
+    value: ${{ steps.setup.outputs.results-file }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: "22"
+
+    - name: Install Drengr
+      run: npm install -g "drengr@$VERSION"
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+
+    - name: Resolve results path
+      id: setup
+      run: |
+        if [ -z "$OUT" ]; then
+          case "$FORMAT" in
+            junit) OUT="drengr-results.xml" ;;
+            json)  OUT="drengr-results.json" ;;
+            *)     OUT="drengr-results.txt" ;;
+          esac
+        fi
+        echo "results-file=$OUT" >> "$GITHUB_OUTPUT"
+      shell: bash
+      env:
+        OUT: ${{ inputs.output }}
+        FORMAT: ${{ inputs.format }}
+
+    - name: Run Drengr
+      id: run
+      run: |
+        if [ -n "$API_KEY" ]; then export DRENGR_API_KEY="$API_KEY"; fi
+        if [ -n "$PROVIDER" ]; then export DRENGR_VISION_PROVIDER="$PROVIDER"; fi
+        ARGS=()
+        if [ -n "$SUITE" ]; then ARGS+=("$SUITE"); fi
+        drengr test "${ARGS[@]}" --format "$FORMAT" --output "$RESULTS_FILE"
+      shell: bash
+      env:
+        API_KEY: ${{ inputs.api-key }}
+        PROVIDER: ${{ inputs.provider }}
+        SUITE: ${{ inputs.file }}
+        FORMAT: ${{ inputs.format }}
+        RESULTS_FILE: ${{ steps.setup.outputs.results-file }}
+
+    - name: Upload results
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.setup.outputs.results-file }}
+        if-no-files-found: warn
+        retention-days: ${{ inputs.artifact-retention }}
