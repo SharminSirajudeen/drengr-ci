@@ -75,12 +75,36 @@ steps:
       api-key: ${{ secrets.DRENGR_API_KEY }}
 ```
 
+## Bring your own endpoint
+
+Drengr never calls a model on your behalf and never proxies through us — you bring the key, and the
+call goes straight from the runner to whoever you point it at. `base-url` takes that further: any
+OpenAI-compatible endpoint works, so you are not waiting on Drengr to add a provider.
+
+```yaml
+- uses: SharminSirajudeen/drengr-ci@v1
+  with:
+    base-url: https://openrouter.ai/api/v1
+    model: qwen/qwen3-vl-235b-a22b-instruct
+    api-key: ${{ secrets.OPENROUTER_API_KEY }}
+```
+
+The same works for LiteLLM, vLLM, a self-hosted gateway, or anything else speaking that API. Every
+run prints the provider, the model, and where the choice came from before it starts, so a failure
+never leaves you guessing which model was actually driving the device.
+
+Pick a model that accepts **image input**. Drengr reads the screen as text first, which is cheap and
+usually enough, but it escalates to vision when a screen has unlabeled elements — common in Flutter,
+games, and custom canvas UIs. A text-only model works until it hits one of those.
+
 ## Inputs
 
 | Name | Default | Description |
 |------|---------|-------------|
 | `api-key` | *(env)* | LLM API key. Falls back to whichever provider key is already in the job environment. |
 | `provider` | auto | `gemini`, `openai`, `anthropic`, `groq`, `together`, `fireworks`, `ollama` |
+| `model` | provider default | Any model the provider serves. The run prints which model it used and why. |
+| `base-url` | provider's own | Any OpenAI-compatible endpoint — see "Bring your own endpoint" below. |
 | `file` | auto-detect | Path to the suite. Auto-detects `drengr-tests.yml`, `drengr-tests.yaml`, `.drengr/tests.yml`. |
 | `format` | `json` | `json`, `junit`, or `human` |
 | `output` | by format | Results file (`drengr-results.json` / `.xml` / `.txt`) |
