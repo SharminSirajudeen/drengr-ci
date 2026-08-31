@@ -1,6 +1,54 @@
 # Drengr — GitHub Action
 
-Run mobile app tests in CI. Drengr drives Android emulators and iOS simulators with an AI agent — tap, type, swipe, and verify. It parses `drengr-tests.yml`, reports pass/fail as JSON or JUnit, annotates failures inline on the run, and uploads the results file as a build artifact.
+**Write mobile tests in plain English. No selectors, no XPath, no test IDs.**
+
+Drengr drives real Android emulators and iOS simulators with an AI agent — it reads the screen, taps, types, swipes and verifies. It works on Flutter, games and custom canvas UIs, where selector-based tools have nothing to select. Your key, your model, your runner: Drengr never proxies a call on your behalf.
+
+```yaml
+- name: Login flow
+  task: Log in with test credentials (user@example.com / password123)
+```
+
+![Drengr tapping a button drawn on an HTML canvas in an iOS simulator](docs/canvas-demo.gif)
+
+*An HTML `<canvas>` has no accessibility tree, no DOM children and no selectors. Appium and Detox
+see one opaque rectangle — there is nothing to query. Drengr finds the button and taps it. Watch
+the hit counter.*
+
+## How it compares
+
+| | Appium | Maestro | Detox | **Drengr** |
+|---|---|---|---|---|
+| Scope | native + hybrid | native + hybrid | **React Native only** | native + hybrid |
+| Tests written as | selectors / XPath | YAML flows with selectors | JS matchers, `by.id` etc | **plain English tasks** |
+| Finds elements via | accessibility tree | system-exposed properties | app internals (grey box) | **screen contents, plus vision when unlabeled** |
+| Works when elements are unlabeled | ✗ | ✗ | ✗ | **✓** |
+| Blind coordinate tap available | ✓ | ✓ `tapOn: point: "84%,23%"` | — | ✓ |
+| Deterministic | ✓ | ✓ | ✓ | **✗ — agent-driven** |
+| Cost per run | free | free | free | LLM tokens |
+
+**Sources.** Maestro's selector set and percentage-point taps:
+[docs.maestro.dev](https://docs.maestro.dev). Detox describes itself as *"an open-source end-to-end
+(E2E) testing framework for React Native mobile applications"* using *"gray box"* testing with
+*"access to the internals of the app under test"*:
+[wix.github.io/Detox](https://wix.github.io/Detox/docs/introduction/getting-started).
+
+**The row that matters is row 4.** Every selector-based tool needs something to select. Maestro's
+own Flutter guide says it plainly: *"Flutter web renders to `<canvas>` and does not enable the DOM
+accessibility/semantics overlay by default. Maestro relies on this overlay to find elements."* The
+fix they recommend is to add `semanticLabel` or wrap widgets in `Semantics` — that is, change your
+app so the test tool can see it. Same story for a game, a charting canvas, or any custom-drawn
+surface.
+
+Drengr reads the screen instead, and escalates to vision when elements are unlabeled, so nothing
+has to be added to the app.
+
+**Two honest caveats.** All three tools can tap a raw coordinate you already know — Maestro's
+`tapOn: point:` does exactly that. What no selector-based tool can do is work out *where* to tap
+on a surface it cannot see. And Drengr is not deterministic: an agent decides from what it sees, so
+the same suite can reach the same result by a different route, and it costs tokens. If your app is
+a conventional native form with stable accessibility IDs, Maestro is simpler, deterministic and
+free. Use it.
 
 ## Requirements
 
