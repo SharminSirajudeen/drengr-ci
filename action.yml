@@ -38,6 +38,13 @@ inputs:
       `existing` attaches to a device something else already booted.
     required: false
     default: auto
+  app:
+    description: >-
+      Build to install before the suite runs: the .apk this PR produced on
+      Android, the .app on iOS. A runner's emulator starts empty, so without this
+      every task fails on a missing app.
+    required: false
+    default: ""
   file:
     description: Path to drengr-tests.yml (auto-detected if omitted)
     required: false
@@ -139,6 +146,7 @@ runs:
         if [ -n "$BASE_URL" ]; then export DRENGR_BASE_URL="$BASE_URL"; fi
         ARGS=()
         if [ -n "$SUITE" ]; then ARGS+=("$SUITE"); fi
+        if [ -n "$APP" ]; then ARGS+=(--app-file "$APP"); fi
         drengr test "${ARGS[@]}" --format "$FORMAT" --output "$RESULTS_FILE"
       shell: bash
       env:
@@ -147,6 +155,7 @@ runs:
         MODEL: ${{ inputs.model }}
         BASE_URL: ${{ inputs.base-url }}
         SUITE: ${{ inputs.file }}
+        APP: ${{ inputs.app }}
         FORMAT: ${{ inputs.format }}
         RESULTS_FILE: ${{ steps.setup.outputs.results-file }}
 
