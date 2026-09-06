@@ -31,6 +31,19 @@ inputs:
       Drengr to add a provider.
     required: false
     default: ""
+  device:
+    description: >-
+      Where the device comes from. `auto` lets Drengr boot a headless emulator or
+      simulator on the runner (Android needs KVM, iOS needs a macOS runner).
+      `existing` attaches to a device something else already booted.
+    required: false
+    default: auto
+  android-system-image:
+    description: >-
+      System image used when the runner has no AVD yet (Linux only). Ignored on
+      macOS, where the runner already ships simulators.
+    required: false
+    default: system-images;android-34;google_apis;x86_64
   file:
     description: Path to drengr-tests.yml (auto-detected if omitted)
     required: false
@@ -98,6 +111,24 @@ runs:
       env:
         OUT: ${{ inputs.output }}
         FORMAT: ${{ inputs.format }}
+
+    - name: Provide a device
+      if: inputs.device != 'existing'
+      run: |
+        if [ "$RUNNER_OS" = "Linux" ]; then
+          # boot_android needs an AVD to already exist; the runner image ships the
+          # SDK without one. Create it only when none is present.
+          if ! "$ANDROID_HOME/emulator/emulator" -list-avds 2>/dev/null | grep -q .; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$IMAGE"
+            echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" \
+              create avd -n drengr-ci -k "$IMAGE" --force
+          fi
+        fi
+        drengr query setup --headless
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.android-system-image }}
 
     - name: Run Drengr
       id: run

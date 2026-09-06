@@ -38,3 +38,41 @@ jobs:
           echo "drengr test exit=$code (2 = no API key, reached before device detection)"
           [ "$code" -eq 2 ]
           [ "${{ steps.act.outcome }}" = "failure" ]
+
+  device-android:
+    name: Boots its own Android emulator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Write a suite
+        run: |
+          cat > drengr-tests.yml <<'YAML'
+          app: com.android.settings
+          tasks:
+            - name: Smoke
+              task: Open the app
+              timeout: 30s
+          YAML
+
+      # No API key on purpose: this job proves the device half, which is the part
+      # the action never did. Exit 2 means it reached the model, so a device was
+      # already resolved before it stopped.
+      - id: act
+        continue-on-error: true
+        uses: ./
+        with:
+          format: junit
+
+      - name: A device must exist
+        run: |
+          drengr devices
+          drengr devices | grep -qiE "emulator|device" || {
+            echo "no device was provisioned"; exit 1; }
