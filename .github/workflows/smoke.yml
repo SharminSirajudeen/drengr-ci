@@ -80,3 +80,25 @@ jobs:
           adb devices | awk 'NR>1 && $2=="device" {found=1} END {exit !found}' \
             || { echo "no device was provisioned"; exit 1; }
           drengr devices
+
+  refuses-unreachable-model:
+    name: Refuses a model the runner cannot reach
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { provider: ollama, base-url: "" }
+          - { provider: "",     base-url: "http://localhost:11434/v1" }
+          - { provider: "",     base-url: "http://192.168.1.10:8000/v1" }
+    steps:
+      - uses: actions/checkout@v7
+      - id: act
+        continue-on-error: true
+        uses: ./
+        with:
+          provider: ${{ matrix.provider }}
+          base-url: ${{ matrix.base-url }}
+      - name: Must have refused
+        run: |
+          [ "${{ steps.act.outcome }}" = "failure" ] \
+            || { echo "an unreachable endpoint was accepted"; exit 1; }

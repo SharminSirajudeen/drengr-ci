@@ -38,12 +38,6 @@ inputs:
       `existing` attaches to a device something else already booted.
     required: false
     default: auto
-  android-system-image:
-    description: >-
-      System image used when the runner has no AVD yet (Linux only). Ignored on
-      macOS, where the runner already ships simulators.
-    required: false
-    default: system-images;android-34;google_apis;x86_64
   file:
     description: Path to drengr-tests.yml (auto-detected if omitted)
     required: false
@@ -86,6 +80,25 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Check the model endpoint is reachable from a runner
+      run: |
+        if [ "$PROVIDER" = "ollama" ] || [ "$PROVIDER" = "local" ]; then
+          echo "provider '$PROVIDER' points at the machine running the job."
+          echo "A hosted runner cannot reach a model on your laptop. Give base-url a"
+          echo "reachable OpenAI-compatible endpoint, or run 'drengr test' locally."
+          exit 2
+        fi
+        case "$BASE_URL" in
+          *localhost*|*127.0.0.1*|*://10.*|*://192.168.*|*://172.1[6-9].*|*://172.2*|*://172.3[01].*)
+            echo "base-url '$BASE_URL' is not reachable from a runner."
+            echo "Use an endpoint the runner can resolve."
+            exit 2 ;;
+        esac
+      shell: bash
+      env:
+        PROVIDER: ${{ inputs.provider }}
+        BASE_URL: ${{ inputs.base-url }}
+
     - uses: actions/setup-node@v7
       with:
         node-version: "22"
@@ -114,25 +127,8 @@ runs:
 
     - name: Provide a device
       if: inputs.device != 'existing'
-      run: |
-        if [ "$RUNNER_OS" = "Linux" ]; then
-          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
-          [ -n "$SDK" ] || { echo "no Android SDK on this runner"; exit 2; }
-          AVDM=$(find "$SDK/cmdline-tools" -name avdmanager -type f 2>/dev/null | head -1)
-          SDKM=$(find "$SDK/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -1)
-          [ -n "$AVDM" ] && [ -n "$SDKM" ] || { echo "cmdline-tools not found under $SDK"; exit 2; }
-          if ! "$SDK/emulator/emulator" -list-avds 2>/dev/null | grep -q .; then
-            yes | "$SDKM" --licenses >/dev/null 2>&1 || true
-            "$SDKM" "$IMAGE"
-            echo no | "$AVDM" create avd -n drengr-ci -k "$IMAGE" --force
-          fi
-          "$SDK/emulator/emulator" -list-avds | grep -q . \
-            || { echo "AVD creation did not produce an AVD"; exit 2; }
-        fi
-        drengr query setup --headless
+      run: drengr query setup --headless
       shell: bash
-      env:
-        IMAGE: ${{ inputs.android-system-image }}
 
     - name: Run Drengr
       id: run
