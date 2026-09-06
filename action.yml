@@ -1,4 +1,4 @@
-name: Drengr
+name: Drengr Mobile Tests
 description: >-
   Run mobile app tests with Drengr on Android emulators and iOS simulators.
   Parses drengr-tests.yml, drives the device with an AI agent, and reports

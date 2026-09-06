@@ -1,0 +1,40 @@
+name: Smoke
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  wrapper:
+    name: Wrapper runs and stops where it should
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Write a suite
+        run: |
+          cat > drengr-tests.yml <<'YAML'
+          app: com.example.app
+          tasks:
+            - name: Smoke
+              task: Open the app
+              timeout: 30s
+          YAML
+
+      - id: act
+        continue-on-error: true
+        uses: ./
+        with:
+          format: junit
+
+      - name: Assert
+        run: |
+          drengr --version
+          set +e
+          drengr test --format junit --output /tmp/out.xml
+          code=$?
+          set -e
+          echo "drengr test exit=$code (2 = no API key, reached before device detection)"
+          [ "$code" -eq 2 ]
+          [ "${{ steps.act.outcome }}" = "failure" ]
