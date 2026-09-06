@@ -71,8 +71,12 @@ jobs:
         with:
           format: junit
 
+      # Assert on adb's own device table, never on Drengr's prose: the string
+      # "No devices found" contains both "device" and "emulator", so a loose
+      # grep over that output passes while nothing booted.
       - name: A device must exist
         run: |
+          adb devices
+          adb devices | awk 'NR>1 && $2=="device" {found=1} END {exit !found}' \
+            || { echo "no device was provisioned"; exit 1; }
           drengr devices
-          drengr devices | grep -qiE "emulator|device" || {
-            echo "no device was provisioned"; exit 1; }

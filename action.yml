@@ -116,14 +116,18 @@ runs:
       if: inputs.device != 'existing'
       run: |
         if [ "$RUNNER_OS" = "Linux" ]; then
-          # boot_android needs an AVD to already exist; the runner image ships the
-          # SDK without one. Create it only when none is present.
-          if ! "$ANDROID_HOME/emulator/emulator" -list-avds 2>/dev/null | grep -q .; then
-            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
-            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$IMAGE"
-            echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" \
-              create avd -n drengr-ci -k "$IMAGE" --force
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          [ -n "$SDK" ] || { echo "no Android SDK on this runner"; exit 2; }
+          AVDM=$(find "$SDK/cmdline-tools" -name avdmanager -type f 2>/dev/null | head -1)
+          SDKM=$(find "$SDK/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -1)
+          [ -n "$AVDM" ] && [ -n "$SDKM" ] || { echo "cmdline-tools not found under $SDK"; exit 2; }
+          if ! "$SDK/emulator/emulator" -list-avds 2>/dev/null | grep -q .; then
+            yes | "$SDKM" --licenses >/dev/null 2>&1 || true
+            "$SDKM" "$IMAGE"
+            echo no | "$AVDM" create avd -n drengr-ci -k "$IMAGE" --force
           fi
+          "$SDK/emulator/emulator" -list-avds | grep -q . \
+            || { echo "AVD creation did not produce an AVD"; exit 2; }
         fi
         drengr query setup --headless
       shell: bash
