@@ -2,7 +2,8 @@ name: Drengr Mobile Tests
 description: >-
   Run mobile app tests with Drengr on Android emulators and iOS simulators.
   Parses drengr-tests.yml, drives the device with an AI agent, and reports
-  pass/fail as JSON or JUnit with GitHub annotations.
+  pass/fail as JSON or JUnit with GitHub annotations, evidence for every
+  failure, and one comment on the pull request.
 
 branding:
   icon: smartphone
@@ -57,8 +58,34 @@ inputs:
     description: File the results are written to (defaults by format; uploaded as the artifact)
     required: false
     default: ""
+  evidence-dir:
+    description: >-
+      Folder that receives each task's screenshots, step trail, network calls and
+      device log, plus summary.md for the suite. Uploaded with the results.
+    required: false
+    default: "drengr-evidence"
+  scope-to-changes:
+    description: >-
+      On a pull request, run only the tasks whose `paths:` globs match a file the
+      PR changed. Tasks without `paths:` always run. Ignored on other events.
+    required: false
+    default: "true"
+  comment:
+    description: >-
+      On a pull request, post summary.md as one comment and update it in place on
+      every run. The job needs `pull-requests: write`.
+    required: false
+    default: "true"
+  github-token:
+    description: Token used to list the PR's files and to post the comment.
+    required: false
+    default: ${{ github.token }}
   version:
     description: Version of the drengr npm package to install
+    required: false
+    default: "latest"
+  qa-version:
+    description: Version of the drengr-qa npm package to install
     required: false
     default: "latest"
   artifact-name:
@@ -80,9 +107,18 @@ outputs:
   total:
     description: Total test count
     value: ${{ steps.run.outputs.total }}
+  skipped:
+    description: Number of tasks skipped because no changed file matched their paths
+    value: ${{ steps.run.outputs.skipped }}
   results-file:
     description: Path to the results file
     value: ${{ steps.setup.outputs.results-file }}
+  evidence-dir:
+    description: Folder holding summary.md and one evidence folder per task
+    value: ${{ inputs.evidence-dir }}
+  artifact-url:
+    description: URL of the uploaded results and evidence artifact
+    value: ${{ steps.upload.outputs.artifact-url }}
 
 runs:
   using: composite
@@ -110,11 +146,12 @@ runs:
       with:
         node-version: "22"
 
-    - name: Install Drengr
-      run: npm install -g "drengr@$VERSION"
+    - name: Install Drengr and drengr-qa
+      run: npm install -g "drengr@$VERSION" "drengr-qa@$QA_VERSION"
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
+        QA_VERSION: ${{ inputs.qa-version }}
 
     - name: Resolve results path
       id: setup
@@ -132,6 +169,37 @@ runs:
         OUT: ${{ inputs.output }}
         FORMAT: ${{ inputs.format }}
 
+    # The PR's file list, one path per line, for `drengr test --changed-files`.
+    # A token that cannot read it is a warning, not a failure: the suite then
+    # runs every task, which is the behaviour before this step existed.
+    - name: List the files this pull request changed
+      id: changed
+      if: github.event_name == 'pull_request' && inputs.scope-to-changes == 'true'
+      run: |
+        out="$RUNNER_TEMP/drengr-changed-files.txt"
+        : > "$out"
+        page=1
+        while [ "$page" -le 30 ]; do
+          if ! body=$(curl -sS --fail -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "$API/repos/$REPO/pulls/$PR/files?per_page=100&page=$page"); then
+            echo "::warning::could not list the pull request's files; running every task"
+            rm -f "$out"
+            exit 0
+          fi
+          printf '%s' "$body" | jq -r '.[].filename' >> "$out"
+          [ "$(printf '%s' "$body" | jq 'length')" -lt 100 ] && break
+          page=$((page + 1))
+        done
+        echo "file=$out" >> "$GITHUB_OUTPUT"
+        echo "$(wc -l < "$out") changed file(s)"
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        API: ${{ github.api_url }}
+
     - name: Provide a device
       if: inputs.device != 'existing'
       run: drengr query setup --headless
@@ -145,9 +213,10 @@ runs:
         if [ -n "$MODEL" ]; then export DRENGR_MODEL="$MODEL"; fi
         if [ -n "$BASE_URL" ]; then export DRENGR_BASE_URL="$BASE_URL"; fi
         ARGS=()
-        if [ -n "$SUITE" ]; then ARGS+=("$SUITE"); fi
+        if [ -n "$SUITE" ]; then ARGS+=(--file "$SUITE"); fi
         if [ -n "$APP" ]; then ARGS+=(--app-file "$APP"); fi
-        drengr test "${ARGS[@]}" --format "$FORMAT" --output "$RESULTS_FILE"
+        if [ -n "$CHANGED" ] && [ -f "$CHANGED" ]; then ARGS+=(--changed-files "$CHANGED"); fi
+        drengr-qa test "${ARGS[@]}" --format "$FORMAT" --output "$RESULTS_FILE" --evidence-dir "$EVIDENCE_DIR"
       shell: bash
       env:
         API_KEY: ${{ inputs.api-key }}
@@ -158,12 +227,69 @@ runs:
         APP: ${{ inputs.app }}
         FORMAT: ${{ inputs.format }}
         RESULTS_FILE: ${{ steps.setup.outputs.results-file }}
+        EVIDENCE_DIR: ${{ inputs.evidence-dir }}
+        CHANGED: ${{ steps.changed.outputs.file }}
 
-    - name: Upload results
+    - name: Upload results and evidence
+      id: upload
       if: always()
       uses: actions/upload-artifact@v7
       with:
         name: ${{ inputs.artifact-name }}
-        path: ${{ steps.setup.outputs.results-file }}
+        path: |
+          ${{ steps.setup.outputs.results-file }}
+          ${{ inputs.evidence-dir }}
         if-no-files-found: warn
         retention-days: ${{ inputs.artifact-retention }}
+
+    # One comment per PR, found again by its marker and updated in place, so a
+    # PR with ten pushes carries one verdict, not ten. A token that cannot
+    # comment is a warning: the verdict is still in the summary tab and the log.
+    - name: Post the summary on the pull request
+      if: always() && github.event_name == 'pull_request' && inputs.comment == 'true'
+      run: |
+        marker="<!-- drengr-ci -->"
+        if [ ! -f "$SUMMARY" ]; then
+          echo "no summary at $SUMMARY; nothing to post"
+          exit 0
+        fi
+        body_file="$RUNNER_TEMP/drengr-comment.md"
+        {
+          echo "$marker"
+          head -c 60000 "$SUMMARY"
+          echo
+          if [ -n "$ARTIFACT_URL" ]; then
+            echo "Screenshots, trails and logs: [evidence artifact]($ARTIFACT_URL) · [run]($RUN_URL)"
+          else
+            echo "[run]($RUN_URL)"
+          fi
+        } > "$body_file"
+        payload=$(jq -Rs '{body: .}' "$body_file")
+        hdr=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
+        existing=""
+        page=1
+        while [ "$page" -le 10 ]; do
+          comments=$(curl -sS --fail "${hdr[@]}" "$API/repos/$REPO/issues/$PR/comments?per_page=100&page=$page") || break
+          existing=$(printf '%s' "$comments" | jq -r --arg m "$marker" '[.[] | select(.body | startswith($m))] | first | .id // empty')
+          [ -n "$existing" ] && break
+          [ "$(printf '%s' "$comments" | jq 'length')" -lt 100 ] && break
+          page=$((page + 1))
+        done
+        if [ -n "$existing" ]; then
+          curl -sS --fail -X PATCH "${hdr[@]}" "$API/repos/$REPO/issues/comments/$existing" -d "$payload" > /dev/null \
+            && echo "updated comment $existing" \
+            || echo "::warning::could not update the PR comment (the job needs pull-requests: write)"
+        else
+          curl -sS --fail -X POST "${hdr[@]}" "$API/repos/$REPO/issues/$PR/comments" -d "$payload" > /dev/null \
+            && echo "posted the PR comment" \
+            || echo "::warning::could not post the PR comment (the job needs pull-requests: write)"
+        fi
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        API: ${{ github.api_url }}
+        SUMMARY: ${{ inputs.evidence-dir }}/summary.md
+        ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
