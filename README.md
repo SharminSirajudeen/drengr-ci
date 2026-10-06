@@ -1,6 +1,6 @@
 # Drengr — GitHub Action
 
-Run mobile app tests in CI. Drengr drives Android emulators and iOS simulators with an AI agent — tap, type, swipe, and verify. It parses `drengr-tests.yml`, reports pass/fail as JSON or JUnit, annotates failures inline on the run, uploads the results and the evidence as a build artifact, and on a pull request posts one comment that says what failed and why.
+Run mobile app tests in CI. Drengr drives Android emulators and iOS simulators with an AI agent — tap, type, swipe, and verify. The action runs [drengr-qa](https://github.com/SharminSirajudeen/drengr-qa) over it: it parses `drengr-tests.yml`, runs the tasks a pull request touched, reports pass/fail as JSON or JUnit, annotates failures inline on the run, uploads the results and the evidence as a build artifact, and on a pull request posts one comment that says what failed and why.
 
 ## Requirements
 
@@ -67,8 +67,8 @@ That action shuts its emulator down the moment its own `script:` step ends, so a
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
           disable-animations: true
           script: |
-            npm install -g drengr@latest
-            drengr test --format junit --output drengr-results.xml --evidence-dir drengr-evidence
+            npm install -g drengr@latest drengr-qa@latest
+            drengr-qa test --format junit --output drengr-results.xml --evidence-dir drengr-evidence
         env:
           DRENGR_API_KEY: ${{ secrets.DRENGR_API_KEY }}
 
@@ -151,7 +151,8 @@ Pick a model that accepts **image input**. Drengr reads the screen as text first
 | `scope-to-changes` | `true` | On a pull request, run only tasks whose `paths:` match a changed file. |
 | `comment` | `true` | On a pull request, post `summary.md` as one comment, updated in place. |
 | `github-token` | `github.token` | Token used to list the PR's files and post the comment. |
-| `version` | `latest` | Version of the `drengr` npm package to install. Evidence, classification, `paths:` and the comment need the first release after 0.11.0. |
+| `version` | `latest` | Version of the `drengr` npm package to install. Evidence and `--only` need the first release after 0.11.0. |
+| `qa-version` | `latest` | Version of the `drengr-qa` npm package to install. Classification, `paths:` and the page come from it. |
 | `artifact-name` | `drengr-results` | Artifact name for the results and evidence. |
 | `artifact-retention` | `7` | Days to retain the artifact. |
 
@@ -162,6 +163,7 @@ Pick a model that accepts **image input**. Drengr reads the screen as text first
 | `passed` | Number of passed tests |
 | `failed` | Number of failed tests |
 | `total` | Number of tests that ran. Skipped tasks are listed, not counted. |
+| `skipped` | Number of tasks skipped because no changed file matched their `paths:`. |
 | `results-file` | Path to the results file |
 | `evidence-dir` | Folder holding `summary.md` and one evidence folder per task |
 | `artifact-url` | URL of the uploaded results and evidence artifact |
@@ -183,11 +185,11 @@ Results go to the `--output` file (or stdout when it is omitted); progress goes 
 ## Running it without this action
 
 ```bash
-npm install -g drengr
-drengr test --format junit --output drengr-results.xml --evidence-dir drengr-evidence
+npm install -g drengr drengr-qa
+drengr-qa test --format junit --output drengr-results.xml --evidence-dir drengr-evidence
 ```
 
-`drengr ci` is an alias for `drengr test`. Under Actions both emit `::group::` / `::error::` annotations, write `passed` / `failed` / `total` to `$GITHUB_OUTPUT`, and append `summary.md` to `$GITHUB_STEP_SUMMARY`.
+Under Actions it emits `::error::` annotations with the verdict kind, writes `passed` / `failed` / `total` / `skipped` to `$GITHUB_OUTPUT`, and appends `summary.md` to `$GITHUB_STEP_SUMMARY`. `drengr test` alone runs the suite and leaves the evidence; the verdicts, the scoping and the page are drengr-qa's.
 
 ## License
 

@@ -84,6 +84,10 @@ inputs:
     description: Version of the drengr npm package to install
     required: false
     default: "latest"
+  qa-version:
+    description: Version of the drengr-qa npm package to install
+    required: false
+    default: "latest"
   artifact-name:
     description: Name for the results artifact
     required: false
@@ -103,6 +107,9 @@ outputs:
   total:
     description: Total test count
     value: ${{ steps.run.outputs.total }}
+  skipped:
+    description: Number of tasks skipped because no changed file matched their paths
+    value: ${{ steps.run.outputs.skipped }}
   results-file:
     description: Path to the results file
     value: ${{ steps.setup.outputs.results-file }}
@@ -139,11 +146,12 @@ runs:
       with:
         node-version: "22"
 
-    - name: Install Drengr
-      run: npm install -g "drengr@$VERSION"
+    - name: Install Drengr and drengr-qa
+      run: npm install -g "drengr@$VERSION" "drengr-qa@$QA_VERSION"
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
+        QA_VERSION: ${{ inputs.qa-version }}
 
     - name: Resolve results path
       id: setup
@@ -205,10 +213,10 @@ runs:
         if [ -n "$MODEL" ]; then export DRENGR_MODEL="$MODEL"; fi
         if [ -n "$BASE_URL" ]; then export DRENGR_BASE_URL="$BASE_URL"; fi
         ARGS=()
-        if [ -n "$SUITE" ]; then ARGS+=("$SUITE"); fi
+        if [ -n "$SUITE" ]; then ARGS+=(--file "$SUITE"); fi
         if [ -n "$APP" ]; then ARGS+=(--app-file "$APP"); fi
         if [ -n "$CHANGED" ] && [ -f "$CHANGED" ]; then ARGS+=(--changed-files "$CHANGED"); fi
-        drengr test "${ARGS[@]}" --format "$FORMAT" --output "$RESULTS_FILE" --evidence-dir "$EVIDENCE_DIR"
+        drengr-qa test "${ARGS[@]}" --format "$FORMAT" --output "$RESULTS_FILE" --evidence-dir "$EVIDENCE_DIR"
       shell: bash
       env:
         API_KEY: ${{ inputs.api-key }}
